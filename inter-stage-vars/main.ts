@@ -1,4 +1,9 @@
-function render(device : GPUDevice, renderPassDescriptor : GPURenderPassDescriptor, pipeline : GPURenderPipeline, context : GPUCanvasContext) {
+function render(
+    device : GPUDevice, 
+    renderPassDescriptor : GPURenderPassDescriptor, 
+    pipeline : GPURenderPipeline, 
+    context : GPUCanvasContext,
+    bindGroup: GPUBindGroup) {
 
     // get current textrure from canvas
     for(let colorAttachment of renderPassDescriptor.colorAttachments) {
@@ -10,13 +15,18 @@ function render(device : GPUDevice, renderPassDescriptor : GPURenderPassDescript
     // make a render pass
     const pass = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
     pass.draw(3);
     pass.end();
 
     const commandBuffer = encoder.finish();
     device.queue.submit([commandBuffer]);
 }
- async function main() {
+
+function writeBuffer(device : GPUDevice, buffer: GPUBuffer, offset: GPUSize64, values : ArrayBuffer) : void {
+    device.queue.writeBuffer(buffer, offset, values);
+}
+async function main() {
 
 
     const gpu = navigator.gpu;
@@ -91,6 +101,40 @@ function render(device : GPUDevice, renderPassDescriptor : GPURenderPassDescript
         ],
     };
 
+    // == UNIFORM BUFFER SETUP start ==
+    /*
+        struct Uniforms {
+        gridScale: u32,
+        triangleScale: vec2f
+    };
+    */
+    const uniformSize = 2 + 2;
+    const uniformBufferSize = uniformSize * 4; // since 32 bits are 4 bytes
+
+    const uniformBuffer = device.createBuffer({
+        size: uniformBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const uniformData = new ArrayBuffer(uniformBufferSize);
+    const uniformValuesAsF32View = new Float32Array(uniformData,8,2);
+    const uniformValuesAsU32View = new Uint32Array(uniformData,0,1);
+    
+    uniformValuesAsU32View[0] = 4.0; // grid scale
+    uniformValuesAsF32View[0] = 1.0; // triangle x scale
+    uniformValuesAsF32View[1] = 1.0; // triangle y scale
+
+    const bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            {
+                binding: 0, resource: { buffer: uniformBuffer },
+            }
+        ]
+    })
+
+    // == UNIFORM BUFFER SETUP end ==
+
     // setup observer when canvas resizes
     const observer = new ResizeObserver(entries => {
         for(const entry of entries) {
@@ -100,10 +144,11 @@ function render(device : GPUDevice, renderPassDescriptor : GPURenderPassDescript
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
         }
-        render(device, renderPassDescriptor, pipeline, context);
+        render(device, renderPassDescriptor, pipeline, context,bindGroup);
     });
     observer.observe(canvas);
-    render(device, renderPassDescriptor, pipeline, context);
+    writeBuffer(device, uniformBuffer, 0, uniformData);
+    render(device, renderPassDescriptor, pipeline, context,bindGroup);
     
 }
 
