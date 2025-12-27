@@ -147,6 +147,32 @@ async function main() {
         render(device, renderPassDescriptor, pipeline, context,bindGroup);
     });
     observer.observe(canvas);
+
+    // setup sliders
+    const checkerScaleSlider = document.getElementById('checkerScale') as HTMLInputElement;
+    const scaleXSlider = document.getElementById('scaleX') as HTMLInputElement;
+    const scaleYSlider = document.getElementById('scaleY') as HTMLInputElement;
+
+    checkerScaleSlider.addEventListener('input', () => {
+        uniformValuesAsU32View[0] = parseInt(checkerScaleSlider.value);
+        writeBuffer(device, uniformBuffer, 0, uniformData);
+        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+    });
+
+    scaleXSlider.addEventListener('input', () => {
+        uniformValuesAsF32View[0] = parseFloat(scaleXSlider.value);
+        writeBuffer(device, uniformBuffer, 0, uniformData);
+        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+    });
+
+    scaleYSlider.addEventListener('input', () => {
+        uniformValuesAsF32View[1] = parseFloat(scaleYSlider.value);
+        writeBuffer(device, uniformBuffer, 0, uniformData);
+        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+    });
+
+    // initial render
+
     writeBuffer(device, uniformBuffer, 0, uniformData);
     render(device, renderPassDescriptor, pipeline, context,bindGroup);
     
