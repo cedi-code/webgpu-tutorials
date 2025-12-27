@@ -50,37 +50,31 @@ function render(device : GPUDevice, renderPassDescriptor : GPURenderPassDescript
         format: presentationFormat,
     });
 
-    const module = device.createShaderModule({
-        label: 'red triangle',
-        code:  /* wgsl */ `
-        @vertex fn vs(
-            @builtin(vertex_index) vertexIndex : u32
-        ) -> @builtin(position) vec4f {
-            let pos = array(
-                vec2f(0.0, 0.5), // top
-                vec2f(-0.5, -0.5), // left
-                vec2f(0.5, -0.5) // right
-            );
+    const responseVert = await fetch('./shaders/checkerboardVert.wgsl');
+    const shaderCodeVert = await responseVert.text();
+    const responseFrag = await fetch('./shaders/checkerboardFrag.wgsl');
+    const shaderCodeFrag = await responseFrag.text();
 
-            return vec4f(pos[vertexIndex], 0.0, 1.0);
-        }
-
-        @fragment fn fs() -> @location(0) vec4f {
-            return vec4f(1.0, 0.0, 0.0, 1.0);
-        }
-        `,
+    const vsModule = device.createShaderModule({
+        label: 'hardcoded checkerboard triangle vertex shader',
+        code:  shaderCodeVert,
     });
 
+    const fsModule = device.createShaderModule({
+        label: 'hardcoded checkerboard triangle fragment shader',
+        code: shaderCodeFrag,
+    })
+
     const pipeline = device.createRenderPipeline({
-        label: 'red triangle',
+        label: 'hardcoded checkerboard triangle',
         layout: 'auto',
         vertex: {
             entryPoint: 'vs',
-            module,
+            module: vsModule,
         },
         fragment: {
             entryPoint: 'fs',
-            module,
+            module: fsModule,
             targets: [{ format: presentationFormat }],
         }
     });
