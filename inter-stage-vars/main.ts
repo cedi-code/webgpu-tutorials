@@ -1,9 +1,21 @@
+interface RenderTriangleObj {
+    objScale : number
+    bindGroup: GPUBindGroup,
+    bufferSize: GPUBuffer,
+    valuesSize: Float32Array,
+    bufferGrid: GPUBuffer,
+    valuesGrid: Uint32Array
+};
+
 function render(
     device : GPUDevice, 
     renderPassDescriptor : GPURenderPassDescriptor, 
     pipeline : GPURenderPipeline, 
     context : GPUCanvasContext,
-    bindGroup: GPUBindGroup) {
+    bindGroups: RenderTriangleObj[],
+    sx? : number,
+    sy? : number,
+    sgrid?: number) {
 
     // get current textrure from canvas
     for(let colorAttachment of renderPassDescriptor.colorAttachments) {
@@ -15,12 +27,33 @@ function render(
     // make a render pass
     const pass = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(3);
+    for(const group of bindGroups) {
+        if(sx) {
+            group.valuesSize[0] = group.objScale * sx;
+            device.queue.writeBuffer(group.bufferSize, 0, (group.valuesSize as Float32Array<ArrayBuffer>));
+        }
+        if(sy) {
+            group.valuesSize[1] = group.objScale * sy;
+            device.queue.writeBuffer(group.bufferSize, 0, (group.valuesSize as Float32Array<ArrayBuffer>));
+        }
+        if(sgrid) {
+            group.valuesGrid[0] = sgrid;
+            device.queue.writeBuffer(group.bufferGrid, 0, (group.valuesGrid as Uint32Array<ArrayBuffer>));
+        }
+        pass.setBindGroup(0, group.bindGroup);
+        pass.draw(3);
+    }
     pass.end();
 
     const commandBuffer = encoder.finish();
     device.queue.submit([commandBuffer]);
+}
+
+function rand(min : number = 0.0, max : number = 0.0) : number  {
+    if(max <= min) {
+        return Math.random() * min;
+    }
+    return Math.random() * (max - min) + min;
 }
 
 function writeBuffer(device : GPUDevice, buffer: GPUBuffer, offset: GPUSize64, values : ArrayBuffer) : void {
@@ -101,38 +134,107 @@ async function main() {
         ],
     };
 
-    // == UNIFORM BUFFER SETUP start ==
+
+    // == UNIFORM STATIC BUFFER SETUP start ==
     /*
-        struct Uniforms {
-        gridScale: u32,
+    struct UniformStatic {
+        color1: vec4f,
+        color2: vec4f,
+        offset: vec2f,
+    };
+    */
+    const uniformStaticSize = 
+        4 + // color 1
+        4 + // color 2
+        2 + // offset
+        2; // padding
+    const uniformStaticBufferSize = uniformStaticSize * 4; // since 32 bits are 4 bytes
+    console.log(`Uniform Static Buffer Size: ${uniformStaticBufferSize} bytes`);
+    /*
+    struct UniformsScale {
         triangleScale: vec2f
     };
     */
-    const uniformSize = 2 + 2;
-    const uniformBufferSize = uniformSize * 4; // since 32 bits are 4 bytes
+    const uniformScaleSize = 2; // vec2f 
+    const uniformScaleBufferSize = uniformScaleSize * 4;
+    /*
+    struct UniformGrid {
+        gridScale: u32,
+    };
+    */
+    const uniformGridSize = 1; // u32 
+    const uniformGridBufferSize = 4 * uniformGridSize;
 
-    const uniformBuffer = device.createBuffer({
-        size: uniformBufferSize,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    const numObjects = 30;
+    const objects : RenderTriangleObj[] = [];
+    for(let i : number = 0; i < numObjects; i++) {
+        // buffer
+        const uniformBuffer = device.createBuffer({
+            label: 'Uniform Static Buffer obj:' + i,
+            size: uniformStaticBufferSize,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        {
+            // values
+            const uniformValues = new Float32Array(uniformStaticSize);
+            const kColor1Offset = 0;
+            const kColor2Offset = 4;
+            const kOffsetOffset = 8;
 
-    const uniformData = new ArrayBuffer(uniformBufferSize);
-    const uniformValuesAsF32View = new Float32Array(uniformData,8,2);
-    const uniformValuesAsU32View = new Uint32Array(uniformData,0,1);
-    
-    uniformValuesAsU32View[0] = 4.0; // grid scale
-    uniformValuesAsF32View[0] = 1.0; // triangle x scale
-    uniformValuesAsF32View[1] = 1.0; // triangle y scale
+            uniformValues.set([rand(1),rand(1),0,1], kColor1Offset);
+            uniformValues.set([rand(1),rand(1),0,1], kColor2Offset);
+            uniformValues.set([rand(-0.9, 0.9),rand(-0.9, 0.9)],kOffsetOffset);
+            device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+        }
 
-    const bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-            {
-                binding: 0, resource: { buffer: uniformBuffer },
-            }
-        ]
-    })
+        // buffer
+        const uniformBufferScale = device.createBuffer({
+            label: 'Uniform Scale Buffer obj' + i,
+            size: uniformScaleBufferSize,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
 
+        // values
+        const uniformScaleValues = new Float32Array(uniformScaleSize);
+        const startScale = rand(0.1, 1.0);
+        uniformScaleValues[0] = startScale;
+        uniformScaleValues[1] = startScale;
+
+        device.queue.writeBuffer(uniformBufferScale, 0, uniformScaleValues);
+
+        // buffer
+        const uniformBufferGrid = device.createBuffer({
+            label: 'Uniform Grid Buffer obj' + i,
+            size: uniformGridBufferSize,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        // values
+        const uniformGridValues = new Uint32Array(uniformGridSize);
+        uniformGridValues[0] = 8;
+
+        device.queue.writeBuffer(uniformBufferGrid, 0, uniformGridValues);
+
+
+        const bindGroup = device.createBindGroup({
+            label: 'uniform bind group',
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: uniformBuffer }},
+                { binding: 1, resource: { buffer: uniformBufferScale }},
+                { binding: 2, resource: { buffer: uniformBufferGrid }},
+            ]
+        });
+
+        objects.push({
+            objScale: startScale,
+            bindGroup,
+            bufferSize: uniformBufferScale,
+            valuesSize: uniformScaleValues,
+            bufferGrid: uniformBufferGrid,
+            valuesGrid: uniformGridValues
+        });
+    }
     // == UNIFORM BUFFER SETUP end ==
 
     // setup observer when canvas resizes
@@ -144,7 +246,7 @@ async function main() {
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
         }
-        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+        render(device, renderPassDescriptor, pipeline, context,objects);
     });
     observer.observe(canvas);
 
@@ -154,27 +256,22 @@ async function main() {
     const scaleYSlider = document.getElementById('scaleY') as HTMLInputElement;
 
     checkerScaleSlider.addEventListener('input', () => {
-        uniformValuesAsU32View[0] = parseInt(checkerScaleSlider.value);
-        writeBuffer(device, uniformBuffer, 0, uniformData);
-        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+        const scaleGrid = parseInt(checkerScaleSlider.value);
+        render(device, renderPassDescriptor, pipeline, context, objects, undefined, undefined, scaleGrid);
     });
 
     scaleXSlider.addEventListener('input', () => {
-        uniformValuesAsF32View[0] = parseFloat(scaleXSlider.value);
-        writeBuffer(device, uniformBuffer, 0, uniformData);
-        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+        const scaleX : number = parseFloat(scaleXSlider.value);
+        render(device, renderPassDescriptor, pipeline, context, objects, scaleX);
     });
 
     scaleYSlider.addEventListener('input', () => {
-        uniformValuesAsF32View[1] = parseFloat(scaleYSlider.value);
-        writeBuffer(device, uniformBuffer, 0, uniformData);
-        render(device, renderPassDescriptor, pipeline, context,bindGroup);
+        const scaleY : number =  parseFloat(scaleYSlider.value);
+        render(device, renderPassDescriptor, pipeline, context, objects, undefined, scaleY);
     });
 
     // initial render
-
-    writeBuffer(device, uniformBuffer, 0, uniformData);
-    render(device, renderPassDescriptor, pipeline, context,bindGroup);
+    render(device, renderPassDescriptor, pipeline, context, objects);
     
 }
 

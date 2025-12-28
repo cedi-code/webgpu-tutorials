@@ -1,9 +1,15 @@
-struct Uniforms {
-    gridScale: u32,
+struct UniformsScale {
     triangleScale: vec2f
 };
 
-@group(0) @binding(0) var<uniform> uniforms : Uniforms;
+struct UniformStatic {
+    color1: vec4f,
+    color2: vec4f,
+    offset: vec2f,
+};
+
+@group(0) @binding(0) var<uniform> uniformStatic : UniformStatic;
+@group(0) @binding(1) var<uniform> uniformsScale : UniformsScale;
 
 struct VertexShaderOutput {
     @builtin(position) position: vec4f,
@@ -20,7 +26,9 @@ struct VertexShaderOutput {
 
     var vsOut: VertexShaderOutput;
 
-    vsOut.position = vec4f(pos[vertexIndex] * uniforms.triangleScale, 0.0, 1.0); 
+    let posWorld = pos[vertexIndex] * uniformsScale.triangleScale + uniformStatic.offset;
+
+    vsOut.position = vec4f(posWorld, 0.0, 1.0); 
     
     return vsOut;
 }
