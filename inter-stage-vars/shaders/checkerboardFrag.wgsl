@@ -6,6 +6,7 @@ struct UniformStatic {
     color1: vec4f,
     color2: vec4f,
     offset: vec2f,
+scale: vec2f,
 };
 
 @group(0) @binding(0) var<uniform> uniformStatic : UniformStatic;

@@ -6,6 +6,7 @@ struct UniformStatic {
     color1: vec4f,
     color2: vec4f,
     offset: vec2f,
+    scale: vec2f,
 };
 
 @group(0) @binding(0) var<uniform> uniformStatic : UniformStatic;
@@ -26,7 +27,7 @@ struct VertexShaderOutput {
 
     var vsOut: VertexShaderOutput;
 
-    let posWorld = pos[vertexIndex] * uniformsScale.triangleScale + uniformStatic.offset;
+    let posWorld = pos[vertexIndex] * uniformStatic.scale * uniformsScale.triangleScale + uniformStatic.offset;
 
     vsOut.position = vec4f(posWorld, 0.0, 1.0); 
     

@@ -1,21 +1,20 @@
 interface RenderTriangleObj {
-    objScale : number
-    bindGroup: GPUBindGroup,
-    bufferSize: GPUBuffer,
-    valuesSize: Float32Array,
-    bufferGrid: GPUBuffer,
-    valuesGrid: Uint32Array
+    bindGroup: GPUBindGroup
 };
+
+interface Uniforms {
+    bufferSize: GPUBuffer,
+    valuesSize: Float32Array<ArrayBuffer>,
+    bufferGrid: GPUBuffer,
+    valuesGrid: Uint32Array<ArrayBuffer>
+}
 
 function render(
     device : GPUDevice, 
     renderPassDescriptor : GPURenderPassDescriptor, 
     pipeline : GPURenderPipeline, 
     context : GPUCanvasContext,
-    bindGroups: RenderTriangleObj[],
-    sx? : number,
-    sy? : number,
-    sgrid?: number) {
+    bindGroups: RenderTriangleObj[]) {
 
     // get current textrure from canvas
     for(let colorAttachment of renderPassDescriptor.colorAttachments) {
@@ -28,18 +27,6 @@ function render(
     const pass = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
     for(const group of bindGroups) {
-        if(sx) {
-            group.valuesSize[0] = group.objScale * sx;
-            device.queue.writeBuffer(group.bufferSize, 0, (group.valuesSize as Float32Array<ArrayBuffer>));
-        }
-        if(sy) {
-            group.valuesSize[1] = group.objScale * sy;
-            device.queue.writeBuffer(group.bufferSize, 0, (group.valuesSize as Float32Array<ArrayBuffer>));
-        }
-        if(sgrid) {
-            group.valuesGrid[0] = sgrid;
-            device.queue.writeBuffer(group.bufferGrid, 0, (group.valuesGrid as Uint32Array<ArrayBuffer>));
-        }
         pass.setBindGroup(0, group.bindGroup);
         pass.draw(3);
     }
@@ -141,13 +128,14 @@ async function main() {
         color1: vec4f,
         color2: vec4f,
         offset: vec2f,
+        objscale: vec2f,
     };
     */
     const uniformStaticSize = 
         4 + // color 1
         4 + // color 2
         2 + // offset
-        2; // padding
+        2; // objscale
     const uniformStaticBufferSize = uniformStaticSize * 4; // since 32 bits are 4 bytes
     console.log(`Uniform Static Buffer Size: ${uniformStaticBufferSize} bytes`);
     /*
@@ -165,8 +153,43 @@ async function main() {
     const uniformGridSize = 1; // u32 
     const uniformGridBufferSize = 4 * uniformGridSize;
 
+    // buffer
+    const uniformBufferScale = device.createBuffer({
+        label: 'Uniform Scale Buffer',
+        size: uniformScaleBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // values
+    const uniformScaleValues = new Float32Array(uniformScaleSize);
+    uniformScaleValues[0] = 1.0;
+    uniformScaleValues[1] = 1.0;
+
+    device.queue.writeBuffer(uniformBufferScale, 0, uniformScaleValues);
+
+    // buffer
+    const uniformBufferGrid = device.createBuffer({
+        label: 'Uniform Grid Buffer',
+        size: uniformGridBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // values
+    const uniformGridValues = new Uint32Array(uniformGridSize);
+    uniformGridValues[0] = 8;
+    device.queue.writeBuffer(uniformBufferGrid, 0, uniformGridValues);
+
+    const uniforms : Uniforms = {            
+        bufferSize: uniformBufferScale,
+        valuesSize: uniformScaleValues,
+        bufferGrid: uniformBufferGrid,
+        valuesGrid: uniformGridValues
+    };
+
     const numObjects = 30;
-    const objects : RenderTriangleObj[] = [];
+    const bindGroups : RenderTriangleObj[] = [];
+    
+
     for(let i : number = 0; i < numObjects; i++) {
         // buffer
         const uniformBuffer = device.createBuffer({
@@ -180,41 +203,15 @@ async function main() {
             const kColor1Offset = 0;
             const kColor2Offset = 4;
             const kOffsetOffset = 8;
+            const kObjScaleOffset = 10;
 
             uniformValues.set([rand(1),rand(1),0,1], kColor1Offset);
             uniformValues.set([rand(1),rand(1),0,1], kColor2Offset);
             uniformValues.set([rand(-0.9, 0.9),rand(-0.9, 0.9)],kOffsetOffset);
+            const startScale = rand(0.1, 1.0);
+            uniformValues.set([startScale, startScale], kObjScaleOffset);
             device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
         }
-
-        // buffer
-        const uniformBufferScale = device.createBuffer({
-            label: 'Uniform Scale Buffer obj' + i,
-            size: uniformScaleBufferSize,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-
-        // values
-        const uniformScaleValues = new Float32Array(uniformScaleSize);
-        const startScale = rand(0.1, 1.0);
-        uniformScaleValues[0] = startScale;
-        uniformScaleValues[1] = startScale;
-
-        device.queue.writeBuffer(uniformBufferScale, 0, uniformScaleValues);
-
-        // buffer
-        const uniformBufferGrid = device.createBuffer({
-            label: 'Uniform Grid Buffer obj' + i,
-            size: uniformGridBufferSize,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-
-        // values
-        const uniformGridValues = new Uint32Array(uniformGridSize);
-        uniformGridValues[0] = 8;
-
-        device.queue.writeBuffer(uniformBufferGrid, 0, uniformGridValues);
-
 
         const bindGroup = device.createBindGroup({
             label: 'uniform bind group',
@@ -226,13 +223,8 @@ async function main() {
             ]
         });
 
-        objects.push({
-            objScale: startScale,
-            bindGroup,
-            bufferSize: uniformBufferScale,
-            valuesSize: uniformScaleValues,
-            bufferGrid: uniformBufferGrid,
-            valuesGrid: uniformGridValues
+        bindGroups.push({
+            bindGroup
         });
     }
     // == UNIFORM BUFFER SETUP end ==
@@ -246,7 +238,7 @@ async function main() {
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
         }
-        render(device, renderPassDescriptor, pipeline, context,objects);
+        render(device, renderPassDescriptor, pipeline, context,bindGroups);
     });
     observer.observe(canvas);
 
@@ -257,21 +249,27 @@ async function main() {
 
     checkerScaleSlider.addEventListener('input', () => {
         const scaleGrid = parseInt(checkerScaleSlider.value);
-        render(device, renderPassDescriptor, pipeline, context, objects, undefined, undefined, scaleGrid);
+        uniforms.valuesGrid[0] = scaleGrid;
+        device.queue.writeBuffer(uniforms.bufferGrid, 0, uniforms.valuesGrid);
+        render(device, renderPassDescriptor, pipeline, context, bindGroups);
     });
 
     scaleXSlider.addEventListener('input', () => {
         const scaleX : number = parseFloat(scaleXSlider.value);
-        render(device, renderPassDescriptor, pipeline, context, objects, scaleX);
+        uniforms.valuesSize[0] = scaleX;
+        device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
+        render(device, renderPassDescriptor, pipeline, context, bindGroups);
     });
 
     scaleYSlider.addEventListener('input', () => {
         const scaleY : number =  parseFloat(scaleYSlider.value);
-        render(device, renderPassDescriptor, pipeline, context, objects, undefined, scaleY);
+        uniforms.valuesSize[1] = scaleY;
+        device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
+        render(device, renderPassDescriptor, pipeline, context, bindGroups);
     });
 
     // initial render
-    render(device, renderPassDescriptor, pipeline, context, objects);
+    render(device, renderPassDescriptor, pipeline, context, bindGroups);
     
 }
 
