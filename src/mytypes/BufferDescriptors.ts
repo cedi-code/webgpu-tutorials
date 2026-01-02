@@ -1,14 +1,20 @@
-export interface VertexBufferDescriptor {
+export interface BufferDescriptor {
     label: string;
+    sizeBytes: number;
+    usage: GPUBufferUsageFlags;
+}
+
+export interface VertexBufferDescriptor extends BufferDescriptor {
+    unitSize: number;
     unitSizeBytes: number;
+    size: number;
+    count: number;
     stepMode: "vertex" | "instance";
     attributes: VertexAttribute[];
 }
 
-export interface UniformBufferDescriptor {
-    label: string;
+export interface UniformBufferDescriptor extends BufferDescriptor {
     attributes: UniformMember[];
-    usage: "uniform" | "storage";
     size: number;
 }
 
@@ -16,6 +22,7 @@ export type VertexAttribute = {
     shaderLocation: number;
     name: string;
     format: GPUVertexFormat;
+    offsetBytes: number;
     offset: number;
 };
 

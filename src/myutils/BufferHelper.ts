@@ -1,4 +1,4 @@
-import { UniformMember, UniformBufferDescriptor, UniformType, VertexBufferDescriptor } from "../mytypes";
+import { UniformMember, UniformBufferDescriptor, UniformType, VertexBufferDescriptor, VertexAttribute, BufferDescriptor } from "../mytypes";
 
 interface BufferManager {
 
@@ -6,13 +6,13 @@ interface BufferManager {
 
     init(device: GPUDevice): void;
 
-    createVertexBuffer(descriptor: VertexBufferDescriptor, count: number): GPUBuffer;
-
-    createUniformBuffer(descriptor: UniformBufferDescriptor): GPUBuffer;
+    createBuffer(descriptor : BufferDescriptor): GPUBuffer;
 }
 
 function getByteSize(format: GPUVertexFormat | UniformType): number {
     switch(format) {
+        case "uint16":
+            return 2;
         case "uint32":
         case "sint32":
         case "float32":
@@ -83,12 +83,14 @@ class VertexBufferDescriptorBuilder {
 
     result : Partial<VertexBufferDescriptor> = {};
 
-    constructor(label: string, stepMode?: "vertex" | "instance") {
+    constructor(label: string, count : number, stepMode?: "vertex" | "instance") {
         this.result.label = label;
+        this.result.count = count;
         this.result.stepMode = stepMode || "vertex";
+
     }
 
-    add(shaderLocation: number, name: string, format: GPUVertexFormat): void {
+    add(shaderLocation: number, name: string, format: GPUVertexFormat): VertexBufferDescriptorBuilder {
         if(!this.result.attributes) {
             this.result.attributes = [];
         }
@@ -98,24 +100,26 @@ class VertexBufferDescriptorBuilder {
         let offset = 0;
         if(attrib_count > 0) {
             const last_attrib = this.result.attributes[attrib_count -1];
-            offset = last_attrib.offset + getByteSize(last_attrib.format);
+            offset = last_attrib.offsetBytes + getByteSize(last_attrib.format);
         }
         
         this.result.attributes.push({
             shaderLocation: shaderLocation,
             name: name,
             format: format,
-            offset: offset,
+            offsetBytes: offset,
+            offset: offset / 4,
         });
+        return this;
     }
 
     build(): VertexBufferDescriptor {
         const attrib_count = this.result.attributes?.length;
-        if(!this.result.label || !this.result.attributes?.length || !attrib_count || attrib_count === 0 || !this.result.stepMode) {
+        if(!this.result.label || !this.result.attributes?.length || !attrib_count || attrib_count === 0 || !this.result.stepMode || !this.result.count) {
             throw new Error("Incomplete VertexBufferDescriptor");
         }
         // calc stride
-        let stride = this.result.attributes[attrib_count -1].offset + 
+        let stride = this.result.attributes[attrib_count -1].offsetBytes + 
             getByteSize(this.result.attributes[attrib_count -1].format);
 
         if (stride % 4 !== 0) {
@@ -125,9 +129,26 @@ class VertexBufferDescriptorBuilder {
 
         return {
             label: this.result.label,
+            sizeBytes: stride * this.result.count,
+            usage: GPUBufferUsage.VERTEX,
+            size: this.result.count * (stride / 4),
+            count: this.result.count,
+            unitSize: stride / 4,
             unitSizeBytes: stride,
             stepMode: this.result.stepMode,
             attributes: this.result.attributes,
+        };
+    }
+    buildLayout(): GPUVertexBufferLayout {
+        const descriptor = this.build();
+        return {
+            arrayStride: descriptor.unitSizeBytes,
+            stepMode: descriptor.stepMode,
+            attributes: descriptor.attributes.map((attr : VertexAttribute) => ({
+                shaderLocation: attr.shaderLocation,
+                format: attr.format,
+                offset: attr.offsetBytes,
+            })),
         };
     }
 }
@@ -140,10 +161,10 @@ class UniformBufferDescriptorBuilder {
 
     constructor(label: string, usage?: "uniform" | "storage") {
         this.result.label = label;
-        this.result.usage = usage || "uniform";
+        this.result.usage = usage == "storage" ? GPUBufferUsage.STORAGE : GPUBufferUsage.UNIFORM;
     }
 
-    add(name: string, type: UniformType): void {
+    add(name: string, type: UniformType): UniformBufferDescriptorBuilder {
         if(!this.result.attributes) {
             this.result.attributes = [];
         }
@@ -153,6 +174,7 @@ class UniformBufferDescriptorBuilder {
             type: type,
             offsetBytes: offset,
         });
+        return this;
     }
 
     build(): UniformBufferDescriptor {
@@ -185,7 +207,31 @@ class UniformBufferDescriptorBuilder {
             label: this.result.label,
             attributes: this.result.attributes,
             usage: this.result.usage,
-            size: currOffset,
+            sizeBytes: currOffset,
+            size: currOffset / 4,
+        };
+    }
+}
+
+
+class IndexBufferDescriptorBuilder {
+
+    result : Partial<BufferDescriptor> = {};
+
+    constructor(label: string, count: number, format: GPUIndexFormat) {
+        this.result.label = label;
+        this.result.usage = GPUBufferUsage.INDEX;
+        this.result.sizeBytes = getByteSize(format) * count;
+    }
+
+    build(): BufferDescriptor {
+        if(!this.result.label || !this.result.usage || !this.result.sizeBytes) {
+            throw new Error("Incomplete IndexBufferDescriptor");
+        }
+        return {
+            label: this.result.label,
+            sizeBytes: this.result.sizeBytes,
+            usage: this.result.usage,
         };
     }
 }
@@ -196,34 +242,17 @@ const bufferManager: BufferManager = {
         this.device = device;
     },
 
-    createVertexBuffer(descriptor: VertexBufferDescriptor, count : number): GPUBuffer {
-        // TODO calculate size
-        if(!this.device) {
-            throw new Error("BufferManager not initialized with device");
-        }
-        // calc size
-        const size = descriptor.unitSizeBytes * count;
-        const buffer = this.device.createBuffer({
-            label: descriptor.label,
-            size: size,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        });
-        return buffer;
-    },
-
-    createUniformBuffer(descriptor: UniformBufferDescriptor): GPUBuffer {
+    createBuffer(descriptor : BufferDescriptor): GPUBuffer {
         if(!this.device) {
             throw new Error("BufferManager not initialized with device");
         }
         const buffer = this.device.createBuffer({
             label: descriptor.label,
-            size: descriptor.size,
-            usage: descriptor.usage === "uniform" ? GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST :
-             GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            size: descriptor.sizeBytes,
+            usage: descriptor.usage | GPUBufferUsage.COPY_DST,
         });
-
         return buffer;
-    },
+    }
 };
 
-export { bufferManager, VertexBufferDescriptorBuilder, UniformBufferDescriptorBuilder };
+export { bufferManager, VertexBufferDescriptorBuilder, UniformBufferDescriptorBuilder, IndexBufferDescriptorBuilder };
