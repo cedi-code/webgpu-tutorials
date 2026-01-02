@@ -181,7 +181,6 @@ class UniformBufferDescriptorBuilder {
         // padding in the end
         currOffset = Math.ceil(currOffset / maxAlign) * maxAlign;
 
-
         return {
             label: this.result.label,
             attributes: this.result.attributes,
