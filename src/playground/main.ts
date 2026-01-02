@@ -132,6 +132,8 @@ async function main() {
         }
     });
 
+    
+
     const renderPassDescriptor : GPURenderPassDescriptor= {
         label: 'basic renderpass',
         colorAttachments: [
