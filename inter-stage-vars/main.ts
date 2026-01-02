@@ -1,6 +1,3 @@
-interface RenderTriangleObj {
-    bindGroup: GPUBindGroup
-};
 
 interface Uniforms {
     bufferSize: GPUBuffer,
@@ -14,7 +11,13 @@ function render(
     renderPassDescriptor : GPURenderPassDescriptor, 
     pipeline : GPURenderPipeline, 
     context : GPUCanvasContext,
-    bindGroups: RenderTriangleObj[]) {
+    bindGroup: GPUBindGroup, 
+    vertexBuffer: GPUBuffer,
+    indexBuffer: GPUBuffer,
+    instanceBuffer: GPUBuffer,
+    numVert : number,
+    numObjects : number
+    ) {
 
     // get current textrure from canvas
     for(let colorAttachment of renderPassDescriptor.colorAttachments) {
@@ -26,10 +29,11 @@ function render(
     // make a render pass
     const pass = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
-    for(const group of bindGroups) {
-        pass.setBindGroup(0, group.bindGroup);
-        pass.draw(3);
-    }
+    pass.setVertexBuffer(0, vertexBuffer);
+    pass.setVertexBuffer(1, instanceBuffer);
+    pass.setIndexBuffer(indexBuffer, 'uint32');
+    pass.setBindGroup(0, bindGroup);
+    pass.drawIndexed(numVert, numObjects);
     pass.end();
 
     const commandBuffer = encoder.finish();
@@ -101,6 +105,25 @@ async function main() {
         vertex: {
             entryPoint: 'vs',
             module: vsModule,
+            buffers: [
+                {
+                    arrayStride: 2 * 4, // 2 float, 4 bytes
+                    stepMode: 'vertex',
+                    attributes: [
+                        {shaderLocation: 0, offset: 0, format: 'float32x2'}, // pos
+                    ],
+                },
+                {
+                    arrayStride: (4 + 4 + 2 + 2) * 4, // 8 floats for colors + 2 for scale and 2 for offset
+                    stepMode: 'instance',
+                    attributes: [
+                        {shaderLocation: 1, offset: 0,  format: 'float32x4'}, // col1
+                        {shaderLocation: 2, offset: 16, format: 'float32x4'}, // col2
+                        {shaderLocation: 3, offset: 32, format: 'float32x2'}, // scale
+                        {shaderLocation: 4, offset: 40, format: 'float32x2'}, // offset
+                    ]
+                }
+            ],
         },
         fragment: {
             entryPoint: 'fs',
@@ -123,21 +146,7 @@ async function main() {
 
 
     // == UNIFORM STATIC BUFFER SETUP start ==
-    /*
-    struct UniformStatic {
-        color1: vec4f,
-        color2: vec4f,
-        offset: vec2f,
-        objscale: vec2f,
-    };
-    */
-    const uniformStaticSize = 
-        4 + // color 1
-        4 + // color 2
-        2 + // offset
-        2; // objscale
-    const uniformStaticBufferSize = uniformStaticSize * 4; // since 32 bits are 4 bytes
-    console.log(`Uniform Static Buffer Size: ${uniformStaticBufferSize} bytes`);
+
     /*
     struct UniformsScale {
         triangleScale: vec2f
@@ -186,48 +195,116 @@ async function main() {
         valuesGrid: uniformGridValues
     };
 
-    const numObjects = 30;
-    const bindGroups : RenderTriangleObj[] = [];
-    
-
-    for(let i : number = 0; i < numObjects; i++) {
-        // buffer
-        const uniformBuffer = device.createBuffer({
-            label: 'Uniform Static Buffer obj:' + i,
-            size: uniformStaticBufferSize,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-        {
-            // values
-            const uniformValues = new Float32Array(uniformStaticSize);
-            const kColor1Offset = 0;
-            const kColor2Offset = 4;
-            const kOffsetOffset = 8;
-            const kObjScaleOffset = 10;
-
-            uniformValues.set([rand(1),rand(1),0,1], kColor1Offset);
-            uniformValues.set([rand(1),rand(1),0,1], kColor2Offset);
-            uniformValues.set([rand(-0.9, 0.9),rand(-0.9, 0.9)],kOffsetOffset);
-            const startScale = rand(0.1, 1.0);
-            uniformValues.set([startScale, startScale], kObjScaleOffset);
-            device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
-        }
-
-        const bindGroup = device.createBindGroup({
-            label: 'uniform bind group',
-            layout: pipeline.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: uniformBuffer }},
-                { binding: 1, resource: { buffer: uniformBufferScale }},
-                { binding: 2, resource: { buffer: uniformBufferGrid }},
-            ]
-        });
-
-        bindGroups.push({
-            bindGroup
-        });
-    }
     // == UNIFORM BUFFER SETUP end ==
+
+    const numObjects = 30;
+    /*
+    struct VertexData {
+        pos: vec2f
+        color1: vec4f,
+        color2: vec4f,
+        offset: vec2f,
+        objscale: vec2f,
+    };
+    */
+    const instanceVertexUnitSize = 
+        4 + // color 1
+        4 + // color 2
+        2 + // offset
+        2; // objscale
+    const staticUnitBufferSize = instanceVertexUnitSize * 4; // since 32 bits are 4 bytes
+    console.log(` instance unit Buffer Size: ${staticUnitBufferSize} bytes`);
+
+    const instanceVertexBufferSize = staticUnitBufferSize * numObjects;
+    const instanceVertexSize = instanceVertexUnitSize * numObjects;
+
+    // buffer
+    const instanceBuffer = device.createBuffer({
+        label: 'vertex Buffer instance objects',
+        size: instanceVertexBufferSize,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+
+    // values
+    const instanceValues = new Float32Array(instanceVertexSize);
+
+    for(let i : number = 0; i < numObjects; ++i) {
+
+        const currIndex : number = instanceVertexUnitSize * i;
+        // values
+        const kColor1Offset = currIndex + 0;
+        const kColor2Offset = currIndex + 4;
+        const kOffsetOffset = currIndex + 8;
+        const kObjScaleOffset = currIndex + 10;
+
+        instanceValues.set([rand(1),rand(1),0,1], kColor1Offset);
+        instanceValues.set([rand(1),rand(1),0,1], kColor2Offset);
+        instanceValues.set([rand(-0.9, 0.9),rand(-0.9, 0.9)],kOffsetOffset);
+        const startScale = rand(0.1, 1.0);
+        instanceValues.set([startScale, startScale], kObjScaleOffset);
+        
+    }
+    device.queue.writeBuffer(instanceBuffer, 0, instanceValues);
+
+    const numVerticies = 6;
+    const verteDataSize = numVerticies * 2; // vec2
+    const vertexDataBufferSize = verteDataSize * 4;
+
+    // buffer
+    const vertexBuffer = device.createBuffer({
+        label: 'vertex buffer verticies',
+        size: vertexDataBufferSize,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+
+    // values
+    const vertexData = new Float32Array(verteDataSize);
+    
+    vertexData[0] = 0.5;
+    vertexData[1] = 0.5;
+
+    vertexData[2] = -0.5;
+    vertexData[3] = -0.5;
+
+    vertexData[4] = 0.5;
+    vertexData[5] = -0.5;
+
+    vertexData[6] = -0.5;
+    vertexData[7] = 0.5;
+
+    const indexSize = 3 * 2; // 3 verticies, 2 triangles, 4 bytes
+    const indexBufferSize = indexSize * 4;
+
+    device.queue.writeBuffer(vertexBuffer, 0, vertexData);
+
+    // buffer
+    const indexBuffer = device.createBuffer({
+        label: 'index buffer',
+        size: indexBufferSize,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    });
+
+    // values
+    const indexData = new Uint32Array(indexSize);
+    indexData[0] = 0;
+    indexData[1] = 1;
+    indexData[2] = 2;
+
+    indexData[3] = 0;
+    indexData[4] = 3;
+    indexData[5] = 1;
+
+    device.queue.writeBuffer(indexBuffer, 0, indexData);
+
+    const bindGroup = device.createBindGroup({
+        label: 'bind group checkerboard trees',
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: uniformBufferScale }},
+            { binding: 1, resource: { buffer: uniformBufferGrid }},
+        ]
+    });
+
 
     // setup observer when canvas resizes
     const observer = new ResizeObserver(entries => {
@@ -238,7 +315,7 @@ async function main() {
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
         }
-        render(device, renderPassDescriptor, pipeline, context,bindGroups);
+        render(device, renderPassDescriptor, pipeline, context,bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numVerticies, numObjects);
     });
     observer.observe(canvas);
 
@@ -251,25 +328,25 @@ async function main() {
         const scaleGrid = parseInt(checkerScaleSlider.value);
         uniforms.valuesGrid[0] = scaleGrid;
         device.queue.writeBuffer(uniforms.bufferGrid, 0, uniforms.valuesGrid);
-        render(device, renderPassDescriptor, pipeline, context, bindGroups);
+        render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numVerticies, numObjects);
     });
 
     scaleXSlider.addEventListener('input', () => {
         const scaleX : number = parseFloat(scaleXSlider.value);
         uniforms.valuesSize[0] = scaleX;
         device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
-        render(device, renderPassDescriptor, pipeline, context, bindGroups);
+        render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numVerticies, numObjects);
     });
 
     scaleYSlider.addEventListener('input', () => {
         const scaleY : number =  parseFloat(scaleYSlider.value);
         uniforms.valuesSize[1] = scaleY;
         device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
-        render(device, renderPassDescriptor, pipeline, context, bindGroups);
+        render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numVerticies, numObjects);
     });
 
     // initial render
-    render(device, renderPassDescriptor, pipeline, context, bindGroups);
+    render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numVerticies, numObjects);
     
 }
 
