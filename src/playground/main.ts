@@ -1,4 +1,5 @@
 import { bufferManager, IndexBufferDescriptorBuilder, UniformBufferDescriptorBuilder, VertexBufferDescriptorBuilder } from '../myutils/BufferHelper.js';
+import { meshHelper, primitives } from '../myutils/MeshHelper.js';
 
 interface Uniforms {
     bufferSize: GPUBuffer,
@@ -224,36 +225,14 @@ async function main() {
     const triangleVBDesc = triangleBufferBuilder.build();
     const vertexBuffer = bufferManager.createBuffer(triangleVBDesc);
 
-    // values
-    const vertexData = new Float32Array(triangleVBDesc.unitSize * numVerticies);
-    
-    vertexData[0] = 0.5;
-    vertexData[1] = 0.5;
-
-    vertexData[2] = -0.5;
-    vertexData[3] = -0.5;
-
-    vertexData[4] = 0.5;
-    vertexData[5] = -0.5;
-
-    vertexData[6] = -0.5;
-    vertexData[7] = 0.5;
+    const meshSquare = primitives.square(0.5);
+    const {v: vertexData , f: indexData} = meshHelper.convertMeshToValues(meshSquare, triangleVBDesc.unitSize);
 
     device.queue.writeBuffer(vertexBuffer, 0, vertexData);
 
-    const numIndicies = 3 * 2; // 3 verticies, 2 triangles
+    const numIndicies = meshSquare.f_size()*3;
     const indexBufferDesc = new IndexBufferDescriptorBuilder("Index Buffer", numIndicies, "uint32").build();
     const indexBuffer = bufferManager.createBuffer(indexBufferDesc);
-
-    // values
-    const indexData = new Uint32Array(numIndicies);
-    indexData[0] = 0;
-    indexData[1] = 1;
-    indexData[2] = 2;
-
-    indexData[3] = 0;
-    indexData[4] = 3;
-    indexData[5] = 1;
 
     device.queue.writeBuffer(indexBuffer, 0, indexData);
 
