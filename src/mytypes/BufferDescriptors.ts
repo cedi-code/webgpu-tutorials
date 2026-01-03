@@ -34,4 +34,5 @@ export interface UniformMember {
     type: UniformType;
     // The Manager (or a Utility) calculates it based on WGSL rules.
     offsetBytes: number; 
+    offset : number;
 }

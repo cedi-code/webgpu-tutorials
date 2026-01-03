@@ -5,10 +5,10 @@ const primitives = {
     square(s: number) : MeshData {
         return {
             v: [
-                [s,s],      // RIGHT TOP
-                [-s, -s],   // LEFT BOTTOM
-                [s, -s],    // RIGHT BOTTOM
-                [-s, s],    // LEFT TOP
+                [s,s,s],      // RIGHT TOP
+                [-s, -s,s],   // LEFT BOTTOM
+                [s, -s,s],    // RIGHT BOTTOM
+                [-s, s,s],    // LEFT TOP
 
             ],
             v_size : () => { return 4;},

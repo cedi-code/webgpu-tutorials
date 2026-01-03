@@ -173,6 +173,7 @@ class UniformBufferDescriptorBuilder {
             name,
             type: type,
             offsetBytes: offset,
+            offset: offset / 4,
         });
         return this;
     }
@@ -194,6 +195,7 @@ class UniformBufferDescriptorBuilder {
             const align = alignFromType(member.type);
             currOffset = Math.ceil(currOffset / align) * align;
             member.offsetBytes = currOffset;
+            member.offset = currOffset / 4;
             currOffset += getByteSize(member.type);
             
             maxAlign = Math.max(maxAlign, align);

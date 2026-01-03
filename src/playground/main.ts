@@ -2,8 +2,8 @@ import { bufferManager, IndexBufferDescriptorBuilder, UniformBufferDescriptorBui
 import { meshHelper, primitives } from '../myutils/MeshHelper.js';
 
 interface Uniforms {
-    bufferSize: GPUBuffer,
-    valuesSize: Float32Array<ArrayBuffer>,
+    bufferMatricies: GPUBuffer,
+    valuesMatricies: Float32Array<ArrayBuffer>,
     bufferGrid: GPUBuffer,
     valuesGrid: Uint32Array<ArrayBuffer>
 }
@@ -83,7 +83,7 @@ async function main() {
         format: presentationFormat,
     });
 
-    const responseVert = await fetch('./shaders/checkerboardVert.wgsl');
+    const responseVert = await fetch('./shaders/simpleProjVert.wgsl');
     const shaderCodeVert = await responseVert.text();
     const responseFrag = await fetch('./shaders/checkerboardFrag.wgsl');
     const shaderCodeFrag = await responseFrag.text();
@@ -98,11 +98,12 @@ async function main() {
         code: shaderCodeFrag,
     });
 
-    const numVerticies = 4;
-    const triangleBufferBuilder = new VertexBufferDescriptorBuilder("Triangle Vertex Buffer", numVerticies, "vertex")
-        .add(0, "position", "float32x2");
+    const meshCube = primitives.square(50);
+    const numVerticies = meshCube.v_size();
+    const triangleBufferBuilder = new VertexBufferDescriptorBuilder("Square Vertex Buffer", numVerticies, "vertex")
+        .add(0, "position", "float32x3");
 
-    const numObjects = 30;
+    const numObjects = 1;
     const instanceBufferBuilder = new VertexBufferDescriptorBuilder("Instance Buffer", numObjects, "instance")
         .add(1, "color1", "float32x4")
         .add(2, "color2", "float32x4")
@@ -148,10 +149,15 @@ async function main() {
         triangleScale: vec2f
     };
     */
-    const scaleUniformBuilder = new UniformBufferDescriptorBuilder("Uniform Scale Buffer");
-    scaleUniformBuilder.add("triangleScale", "vec2f");
-    const scaleUniformDesc = scaleUniformBuilder.build();
-    const uniformBufferScale = bufferManager.createBuffer(scaleUniformDesc);
+
+    const uniformProjDesc = new UniformBufferDescriptorBuilder("uniforms for projection buffer")
+        .add("ndc mat", "mat4x4f")
+        .add("proj mat", "mat4x4f")
+        .add("translation mat", "mat4x4f")
+        .add("rotation mat", "mat4x4f")
+        .build();
+    const uniformBufferProj = bufferManager.createBuffer(uniformProjDesc);
+
 
     /*
     struct UniformGrid {
@@ -166,28 +172,48 @@ async function main() {
 
 
     // values
-    const uniformScaleValues = new Float32Array(scaleUniformDesc.sizeBytes / 4);
-    const offsetS = scaleUniformDesc.attributes[0].offsetBytes / 4;
-    uniformScaleValues[offsetS] = 1.0;
-    uniformScaleValues[offsetS + 1] = 1.0;
+    const uPValues = new Float32Array(uniformProjDesc.size);
 
-    device.queue.writeBuffer(uniformBufferScale, 0, uniformScaleValues);
+    const offNDC = uniformProjDesc.attributes[0].offset;    // to convert to screenspace
+    const offPM = uniformProjDesc.attributes[1].offset;     // projeciton matrix  (flatten the z axis)
+    const offTM = uniformProjDesc.attributes[2].offset      // translation matrix 
 
-    const uniformGridValues = new Uint32Array(gridUniformDesc.sizeBytes / 4);
-    const offsetG = gridUniformDesc.attributes[0].offsetBytes / 4;
+    uPValues[offNDC + 0] = 2.0 / (canvas.width);
+    uPValues[offNDC + 5] = 2.0 / (canvas.height);
+    uPValues[offNDC + 10] = 1.0
+    uPValues[offNDC + 15] = 1.0;
+
+    uPValues[offPM + 0] = 1.0;
+    uPValues[offPM + 5] = 1.0;
+    uPValues[offPM + 10] = 1.0; // scale z
+    uPValues[offPM + 11] = 1.0; // this is the trick, let z be the homogenius value!
+
+    // translate z
+
+    uPValues[offTM + 0] = 1.0;
+    uPValues[offTM + 5] = 1.0;
+    uPValues[offTM + 10] = 1.0;
+    uPValues[offTM + 15] = 1.0; 
+
+    uPValues[offTM + 12] = 500.0;
+    uPValues[offTM + 14] = 50.0;
+    
+
+    device.queue.writeBuffer(uniformBufferProj,0, uPValues);
+
+    const uniformGridValues = new Uint32Array(gridUniformDesc.size);
+    const offsetG = gridUniformDesc.attributes[0].offset;
     uniformGridValues[offsetG] = 8;
     device.queue.writeBuffer(uniformBufferGrid, 0, uniformGridValues);
 
     const uniforms : Uniforms = {            
-        bufferSize: uniformBufferScale,
-        valuesSize: uniformScaleValues,
+        bufferMatricies: uniformBufferProj,
+        valuesMatricies: uPValues,
         bufferGrid: uniformBufferGrid,
         valuesGrid: uniformGridValues
     };
 
     // == UNIFORM BUFFER SETUP end ==
-
-
     /*
     struct VertexData {
         pos: vec2f
@@ -225,12 +251,12 @@ async function main() {
     const triangleVBDesc = triangleBufferBuilder.build();
     const vertexBuffer = bufferManager.createBuffer(triangleVBDesc);
 
-    const meshSquare = primitives.square(0.5);
-    const {v: vertexData , f: indexData} = meshHelper.convertMeshToValues(meshSquare, triangleVBDesc.unitSize);
+
+    const {v: vertexData , f: indexData} = meshHelper.convertMeshToValues(meshCube, triangleVBDesc.unitSize);
 
     device.queue.writeBuffer(vertexBuffer, 0, vertexData);
 
-    const numIndicies = meshSquare.f_size()*3;
+    const numIndicies = meshCube.f_size()*3;
     const indexBufferDesc = new IndexBufferDescriptorBuilder("Index Buffer", numIndicies, "uint32").build();
     const indexBuffer = bufferManager.createBuffer(indexBufferDesc);
 
@@ -240,7 +266,7 @@ async function main() {
         label: 'bind group checkerboard trees',
         layout: pipeline.getBindGroupLayout(0),
         entries: [
-            { binding: 0, resource: { buffer: uniformBufferScale }},
+            { binding: 0, resource: { buffer: uniformBufferProj }},
             { binding: 1, resource: { buffer: uniformBufferGrid }},
         ]
     });
@@ -254,6 +280,10 @@ async function main() {
             const height = entry.contentBoxSize[0].blockSize;
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
+            uPValues[offNDC + 0] = 2.0 / (canvas.width);
+            uPValues[offNDC + 5] = 2.0 / (canvas.height);
+
+            device.queue.writeBuffer(uniformBufferProj,0, uPValues);
         }
         render(device, renderPassDescriptor, pipeline, context,bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
@@ -273,15 +303,16 @@ async function main() {
 
     scaleXSlider.addEventListener('input', () => {
         const scaleX : number = parseFloat(scaleXSlider.value);
-        uniforms.valuesSize[0] = scaleX;
-        device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
+        
+        uniforms.valuesMatricies[offTM + 14] = scaleX;
+        device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
         render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
 
     scaleYSlider.addEventListener('input', () => {
         const scaleY : number =  parseFloat(scaleYSlider.value);
-        uniforms.valuesSize[1] = scaleY;
-        device.queue.writeBuffer(uniforms.bufferSize, 0, uniforms.valuesSize);
+        // uniforms.valuesMatricies[1] = scaleY;
+        device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
         render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
 
