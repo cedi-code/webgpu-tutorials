@@ -1,6 +1,6 @@
 struct Uniforms {
     ndcMat : mat4x4f,
-    projMat : mat4x4f,
+    fudge : f32,
     transMat : mat4x4f,
     rotMat : mat4x4f,
 };
@@ -22,11 +22,14 @@ struct VertexShaderOutput {
     @location(4) scale: vec2f,  // per instance
 ) -> VertexShaderOutput {
 
-    let hPos =   uniforms.ndcMat * uniforms.projMat * uniforms.transMat * vec4f(pos, 1.0);
+    let orthoPos =  uniforms.ndcMat * uniforms.transMat * vec4f(pos, 1.0);
+
+    let depth = 1.0 + orthoPos.z * uniforms.fudge;
+    let perPos = vec4f(orthoPos.xy/depth,orthoPos.z,1.0);
 
     var vsOut: VertexShaderOutput;
 
-    vsOut.position = hPos;
+    vsOut.position = perPos;
     vsOut.color1 = col1;
     vsOut.color2 = col2;
 

@@ -98,7 +98,7 @@ async function main() {
         code: shaderCodeFrag,
     });
 
-    const meshCube = primitives.square(50);
+    const meshCube = primitives.cube(50);
     const numVerticies = meshCube.v_size();
     const triangleBufferBuilder = new VertexBufferDescriptorBuilder("Square Vertex Buffer", numVerticies, "vertex")
         .add(0, "position", "float32x3");
@@ -152,7 +152,7 @@ async function main() {
 
     const uniformProjDesc = new UniformBufferDescriptorBuilder("uniforms for projection buffer")
         .add("ndc mat", "mat4x4f")
-        .add("proj mat", "mat4x4f")
+        .add("fudge val", "f32")
         .add("translation mat", "mat4x4f")
         .add("rotation mat", "mat4x4f")
         .build();
@@ -175,28 +175,27 @@ async function main() {
     const uPValues = new Float32Array(uniformProjDesc.size);
 
     const offNDC = uniformProjDesc.attributes[0].offset;    // to convert to screenspace
-    const offPM = uniformProjDesc.attributes[1].offset;     // projeciton matrix  (flatten the z axis)
+    const offFudge = uniformProjDesc.attributes[1].offset;     // projeciton matrix  (flatten the z axis)
     const offTM = uniformProjDesc.attributes[2].offset      // translation matrix 
 
+    const near = 1.0;
+    const far = 1000.0;
+
     uPValues[offNDC + 0] = 2.0 / (canvas.width);
-    uPValues[offNDC + 5] = 2.0 / (canvas.height);
-    uPValues[offNDC + 10] = 1.0
+    uPValues[offNDC + 5] = -2.0 / (canvas.height);
+    uPValues[offNDC + 10] = 1 / (far - near); // normalize z to [0,1]; // scale z
+    uPValues[offNDC + 12] = 0; // translate x
+    uPValues[offNDC + 13] = 0; // translate y
+    uPValues[offNDC + 14] = -near / (far - near); // translate the near value to 0
     uPValues[offNDC + 15] = 1.0;
 
-    uPValues[offPM + 0] = 1.0;
-    uPValues[offPM + 5] = 1.0;
-    uPValues[offPM + 10] = 1.0; // scale z
-    uPValues[offPM + 11] = 1.0; // this is the trick, let z be the homogenius value!
+    uPValues[offFudge + 0] = 2.0;
 
-    // translate z
-
-    uPValues[offTM + 0] = 1.0;
-    uPValues[offTM + 5] = 1.0;
-    uPValues[offTM + 10] = 1.0;
-    uPValues[offTM + 15] = 1.0; 
-
-    uPValues[offTM + 12] = 500.0;
-    uPValues[offTM + 14] = 50.0;
+    uPValues[offTM + 0] = 1;
+    uPValues[offTM + 5] = 1;
+    uPValues[offTM + 10] = 1;
+    uPValues[offTM + 12] = 100;
+    uPValues[offTM + 15] = 1;
     
 
     device.queue.writeBuffer(uniformBufferProj,0, uPValues);
@@ -304,14 +303,14 @@ async function main() {
     scaleXSlider.addEventListener('input', () => {
         const scaleX : number = parseFloat(scaleXSlider.value);
         
-        uniforms.valuesMatricies[offTM + 14] = scaleX;
+        uniforms.valuesMatricies[offTM + 14] = 100*scaleX;
         device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
         render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
 
     scaleYSlider.addEventListener('input', () => {
         const scaleY : number =  parseFloat(scaleYSlider.value);
-        // uniforms.valuesMatricies[1] = scaleY;
+        uniforms.valuesMatricies[offFudge] = 2*scaleY;
         device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
         render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
