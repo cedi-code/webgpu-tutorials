@@ -39,18 +39,24 @@ const primitives = {
             v_size : () => { return 8;},
             f: [
                 [0,1,2],
-                [0,3,1], // front triangle
+                [0,3,1], // front triangles
 
-                [4,6,5],
-                [4,5,7], // back triangle
+                [4,5,6],
+                [4,7,5], // back triangles
 
                 [4,2,6],
-                [4,0,2], // right triangle
+                [4,0,2], // right triangles
 
                 [7,1,5],
-                [7,3,1], // left triangle
+                [7,3,1], // left triangles
+
+                [4,3,0],
+                [4,7,3], // top triangles
+
+                [6,1,2],
+                [6,5,1], // bottom triangles
             ],
-            f_size : () => { return 8; },   
+            f_size : () => { return 12; },   
         }
     }
 
