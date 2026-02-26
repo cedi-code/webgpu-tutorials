@@ -1,3 +1,4 @@
+import { mat4 } from 'gl-matrix';
 import { bufferManager, IndexBufferDescriptorBuilder, UniformBufferDescriptorBuilder, VertexBufferDescriptorBuilder } from '../myutils/BufferHelper.js';
 import { meshHelper, primitives } from '../myutils/MeshHelper.js';
 
@@ -7,6 +8,8 @@ interface Uniforms {
     bufferGrid: GPUBuffer,
     valuesGrid: Uint32Array<ArrayBuffer>
 }
+
+let depthTexture : GPUTexture | null = null;
 
 function render(
     device : GPUDevice, 
@@ -22,10 +25,16 @@ function render(
     ) {
 
     // get current textrure from canvas
+    const canvasTexture = context.getCurrentTexture();
+
     for(let colorAttachment of renderPassDescriptor.colorAttachments) {
         if(!colorAttachment) continue; 
-        colorAttachment.view = context.getCurrentTexture().createView();
+        colorAttachment.view = canvasTexture.createView();
     }
+    if(renderPassDescriptor.depthStencilAttachment && depthTexture) {
+        renderPassDescriptor.depthStencilAttachment.view = depthTexture.createView();
+    }
+
     const encoder = device.createCommandEncoder({ label: 'my first encoder'});
 
     // make a render pass
@@ -42,6 +51,47 @@ function render(
     device.queue.submit([commandBuffer]);
 }
 
+
+
+async function getwebgpucontext() : Promise<{ gpu : GPU, adapter: GPUAdapter, device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, presentationFormat : GPUTextureFormat } | null> {
+    const gpu = navigator.gpu;
+    if(!gpu) {
+        alert("browser needs WebGPU support");
+        return null;
+    }
+
+    const adapter = await gpu.requestAdapter();
+    if(!adapter) {
+        alert("could not get gpu adapter");
+        return null;
+    }
+    const device = await adapter?.requestDevice();
+    if(!device) {
+        alert("browser needs WebGPU support");
+        return null;
+    }
+
+    // get webgpu context from canvas
+    const canvas = document.querySelector('canvas');
+    if(!canvas) {
+        console.error("could not find canvas html element");
+        return null;
+    }
+
+    const context = canvas?.getContext('webgpu');
+    if(!context) {
+        console.error("could not get webgpu context from canvas");
+        return null;
+    }
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({
+        device,
+        format: presentationFormat,
+    });
+
+    return { gpu, adapter, device, canvas, context, presentationFormat };
+
+}
 function rand(min : number = 0.0, max : number = 0.0) : number  {
     if(max <= min) {
         return Math.random() * min;
@@ -52,36 +102,12 @@ function rand(min : number = 0.0, max : number = 0.0) : number  {
 async function main() {
 
 
-    const gpu = navigator.gpu;
-    if(!gpu) {
-        alert("browser needs WebGPU support");
+    const webgpucontext = await getwebgpucontext();
+    if(!webgpucontext) {
         return;
     }
+    const { gpu, adapter, device, canvas, context, presentationFormat } = webgpucontext;
 
-    const adapter = await gpu.requestAdapter();
-    const device = await adapter?.requestDevice();
-    if(!device) {
-        alert("browser needs WebGPU support");
-        return;
-    }
-
-    // get webgpu context from canvas
-    const canvas = document.querySelector('canvas');
-    if(!canvas) {
-        console.error("could not find canvas html element");
-        return;
-    }
-
-    const context = canvas?.getContext('webgpu');
-    if(!context) {
-        console.error("could not get webgpu context from canvas");
-        return;
-    }
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({
-        device,
-        format: presentationFormat,
-    });
 
     const responseVert = await fetch('./shaders/simpleProjVert.wgsl');
     const shaderCodeVert = await responseVert.text();
@@ -125,7 +151,19 @@ async function main() {
             entryPoint: 'fs',
             module: fsModule,
             targets: [{ format: presentationFormat }],
+        },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus',
         }
+    });
+
+    // creating texture
+    depthTexture = device.createTexture({
+        size: [canvas.width, canvas.height],
+        format: 'depth24plus',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT
     });
 
 
@@ -139,6 +177,12 @@ async function main() {
                 view: context.getCurrentTexture().createView(),
             },
         ],
+        depthStencilAttachment: {
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+            view: context.getCurrentTexture().createView(),
+        }
     };
 
     bufferManager.init(device);
@@ -174,30 +218,22 @@ async function main() {
     // values
     const uPValues = new Float32Array(uniformProjDesc.size);
 
-    const offNDC = uniformProjDesc.attributes[0].offset;    // to convert to screenspace
+    const offProj = uniformProjDesc.attributes[0].offset;    // to convert to screenspace
     const offFudge = uniformProjDesc.attributes[1].offset;     // projeciton matrix  (flatten the z axis)
     const offTM = uniformProjDesc.attributes[2].offset      // translation matrix 
+    const offTMBytes = uniformProjDesc.attributes[2].offsetBytes;
 
     const near = 1.0;
-    const far = 1000.0;
+    const far = 800.0;
 
-    uPValues[offNDC + 0] = 2.0 / (canvas.width);
-    uPValues[offNDC + 5] = -2.0 / (canvas.height);
-    uPValues[offNDC + 10] = 1 / (far - near); // normalize z to [0,1]; // scale z
-    uPValues[offNDC + 12] = 0; // translate x
-    uPValues[offNDC + 13] = 0; // translate y
-    uPValues[offNDC + 14] = -near / (far - near); // translate the near value to 0
-    uPValues[offNDC + 15] = 1.0;
-
-    uPValues[offFudge + 0] = 2.0;
-
-    uPValues[offTM + 0] = 1;
-    uPValues[offTM + 5] = 1;
-    uPValues[offTM + 10] = 1;
-    uPValues[offTM + 12] = 100;
-    uPValues[offTM + 15] = 1;
+    const perspectiveMat = uPValues.subarray(offProj, offProj+16);
+    mat4.perspective(perspectiveMat, Math.PI/2, canvas.width/canvas.height, near, far);
     
+    const transformMat = uPValues.subarray(offTM, offTM+16);
 
+    mat4.identity(transformMat);
+    mat4.translate(transformMat, transformMat, [0,0,-300]);
+    
     device.queue.writeBuffer(uniformBufferProj,0, uPValues);
 
     const uniformGridValues = new Uint32Array(gridUniformDesc.size);
@@ -279,10 +315,21 @@ async function main() {
             const height = entry.contentBoxSize[0].blockSize;
             canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
-            uPValues[offNDC + 0] = 2.0 / (canvas.width);
-            uPValues[offNDC + 5] = 2.0 / (canvas.height);
+            
+            mat4.perspective(perspectiveMat, Math.PI/2, canvas.width/canvas.height, near, far);
 
-            device.queue.writeBuffer(uniformBufferProj,0, uPValues);
+            if(!depthTexture || depthTexture.width !== canvas.width || depthTexture.height !== canvas.height) {
+                if(depthTexture) {
+                    depthTexture.destroy();
+                }
+                depthTexture = device.createTexture({
+                        size: [width, height],
+                        format: 'depth24plus',
+                        usage: GPUTextureUsage.RENDER_ATTACHMENT
+                });
+            }
+
+            device.queue.writeBuffer(uniformBufferProj,offProj * 4, uPValues);
         }
         render(device, renderPassDescriptor, pipeline, context,bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
@@ -303,21 +350,33 @@ async function main() {
     scaleXSlider.addEventListener('input', () => {
         const scaleX : number = parseFloat(scaleXSlider.value);
         
-        uniforms.valuesMatricies[offTM + 14] = 100*scaleX;
-        device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
+        uniforms.valuesMatricies[offTM + 14] = -100*scaleX;
+        device.queue.writeBuffer(uniforms.bufferMatricies, offTMBytes, uniforms.valuesMatricies, offTM, 16);
         render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     });
 
+    let speed = 1.0;
     scaleYSlider.addEventListener('input', () => {
         const scaleY : number =  parseFloat(scaleYSlider.value);
         uniforms.valuesMatricies[offFudge] = 2*scaleY;
-        device.queue.writeBuffer(uniforms.bufferMatricies, 0, uniforms.valuesMatricies);
-        render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
+        speed = scaleY * 2;
+
     });
+
+    const timeStep = 0.0016;
+    function animate(time : number) {
+        mat4.rotateY(transformMat,transformMat, speed*timeStep*Math.PI)
+        device.queue.writeBuffer(uniforms.bufferMatricies,  offTMBytes, uniforms.valuesMatricies, offTM, 16);
+        
+        render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
+        requestAnimationFrame(animate);
+
+    }
 
     // initial render
     render(device, renderPassDescriptor, pipeline, context, bindGroup, vertexBuffer, indexBuffer, instanceBuffer, numIndicies, numObjects);
     
+    requestAnimationFrame(animate);
 }
 
 main();
