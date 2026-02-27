@@ -1,4 +1,4 @@
-import { bufferManager, IndexBufferDescriptorBuilder, VertexBufferDescriptorBuilder } from '../myutils/BufferHelper.js';
+import { bufferManager, IndexBufferDescriptorBuilder, UniformBufferDescriptorBuilder, VertexBufferDescriptorBuilder } from '../myutils/BufferHelper.js';
 import {render, getwebgpucontext} from './main.js';
 
 
@@ -86,6 +86,16 @@ async function main() {
 
     device.queue.writeBuffer(indexBuffer, 0, indexValues);
 
+    const uniformBufferDesc = new UniformBufferDescriptorBuilder("uniforms", "uniform")
+            .add("scale", "f32").build();
+    const uniformBuffer = bufferManager.createBuffer(uniformBufferDesc);
+    const uniformV = new Float32Array(uniformBufferDesc.size);
+    const offScale = uniformBufferDesc.attributes[0].offset;
+    uniformV[offScale] = 1.0;
+
+    device.queue.writeBuffer(uniformBuffer, 0, uniformV);
+
+
     // == BUFFER end ==
 
     // == TEXTURE start ==
@@ -122,19 +132,78 @@ async function main() {
     );
 
     // sampler
-    const sampler = device.createSampler();
+    const samplers = [
+        device.createSampler({
+            addressModeU: 'repeat',
+            addressModeV: 'repeat',
+            magFilter: 'nearest',
+            minFilter: 'nearest',
+        }),
+        device.createSampler({
+            addressModeU: 'repeat',
+            addressModeV: 'repeat',
+            magFilter: 'linear',
+            minFilter: 'linear',
+        }),
+        device.createSampler({
+            addressModeU: 'clamp-to-edge',
+            addressModeV: 'clamp-to-edge',
+            magFilter: 'nearest',
+            minFilter: 'nearest',
+        }),
+        device.createSampler({
+            addressModeU: 'clamp-to-edge',
+            addressModeV: 'clamp-to-edge',
+            magFilter: 'linear',
+            minFilter: 'linear',
+        }),
+    ];
+
 
     // pass our sampler and texture to bind group
-    const bindGroup = device.createBindGroup({
-        label: 'bind group texture',
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-            { binding: 0, resource: sampler },
-            { binding: 1, resource: texture},
-        ],
-    });
+    const bindGroups : GPUBindGroup[] = [];
+    for(let sampler of samplers) {
+        const bindGroup = device.createBindGroup({
+            label: 'bind group texture',
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: sampler },
+                { binding: 1, resource: texture},
+                { binding: 2, resource: { buffer: uniformBuffer } },
+            ],
+        });
+        bindGroups.push(bindGroup);
+    }
 
-    
+    const sliderScale = document.getElementById('checkerScale') as HTMLInputElement;
+    const radioAdressModeRepeat = document.getElementById("radio-repeat") as HTMLInputElement;
+    const radioAdressModeClampToEdge = document.getElementById("radio-clamp-to-edge") as HTMLInputElement;
+    const radioFilterNearest = document.getElementById("radio-nearest") as HTMLInputElement;
+    const radioFilterLinear = document.getElementById("radio-linear") as HTMLInputElement;
+
+    sliderScale.addEventListener('input', () => {
+
+        const scale = parseFloat(sliderScale.value);
+        uniformV[offScale] = scale * 0.5;
+        device.queue.writeBuffer(uniformBuffer, 0, uniformV);
+        for(let colorAttachment of renderPassDescriptor.colorAttachments) {
+            if(!colorAttachment) continue; 
+            colorAttachment.view = context.getCurrentTexture().createView();
+        }
+        if(radioAdressModeRepeat.checked) {
+            if(radioFilterNearest.checked) {
+                draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[0]);
+            } else {
+                draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[1]);
+            }
+        } else {
+            if(radioFilterNearest.checked) {
+                draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[2]);
+            } else {
+                draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[3]);
+            }
+        }
+    });
 
     const observer = new ResizeObserver(entries => {
         for(const entry of entries) {
@@ -148,7 +217,7 @@ async function main() {
             if(!colorAttachment) continue; 
             colorAttachment.view = context.getCurrentTexture().createView();
         }
-        draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroup);
+        draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[0]);
         
     });
     observer.observe(canvas);
@@ -159,7 +228,7 @@ async function main() {
         colorAttachment.view = context.getCurrentTexture().createView();
     }
 
-    draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroup);
+    draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[0]);
 }
 
 function draw(device: GPUDevice, renderPassDescriptor: GPURenderPassDescriptor, pipeline: GPURenderPipeline, planeVertexBuffer: GPUBuffer, indexBuffer: GPUBuffer, bindGroup: GPUBindGroup) {
