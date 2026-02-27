@@ -3,6 +3,11 @@ import {render, getwebgpucontext} from './main.js';
 
 
 console.log("== texture-test.js ==");
+async function loadImageBitmap(url : string) : Promise<ImageBitmap> {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await createImageBitmap(blob, { colorSpaceConversion: 'none' });
+}
 
 async function main() {
     const webgpucontext = await getwebgpucontext();
@@ -101,34 +106,25 @@ async function main() {
     // == TEXTURE start ==
 
     // DATA
-    const kTextureW = 5;
-    const kTextureH = 7;
-    const _ = [255,   0,   0, 255];  // red
-    const y = [255, 255,   0, 255];  // yellow
-    const b = [  0,   0, 255, 255];  // blue
-    const textureData = new Uint8Array([
-        b, _, _, _, _,
-        _, y, y, y, _,
-        _, y, _, _, _,
-        _, y, y, _, _,
-        _, y, _, _, _,
-        _, y, _, _, _,
-        _, _, _, _, _,
-    ].flat());
-
-
-    // texture
+   const url = "https://corsproxy.io/?https://placebear.com/512/512";
+    const source = await loadImageBitmap(url);
+    if(!source) {
+        alert("image:" + url + " not found");
+        return;
+    }
     const texture = device.createTexture({
-        size: [kTextureW, kTextureH],
-        format: 'rgba8unorm', // 8 bits unsigned int, norm = values will be normalized
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, 
+        label: url,
+        format: 'rgba8unorm',
+        size: [source.width, source.height],
+        usage: GPUTextureUsage.TEXTURE_BINDING |
+               GPUTextureUsage.COPY_DST |
+               GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
-    device.queue.writeTexture(
+    device.queue.copyExternalImageToTexture(
+        { source },
         { texture },
-        textureData,
-        { bytesPerRow: kTextureW * 4},
-        { width: kTextureW, height: kTextureH },
+        { width: source.width, height: source.height },
     );
 
     // sampler
@@ -181,10 +177,7 @@ async function main() {
     const radioFilterNearest = document.getElementById("radio-nearest") as HTMLInputElement;
     const radioFilterLinear = document.getElementById("radio-linear") as HTMLInputElement;
 
-    sliderScale.addEventListener('input', () => {
-
-        const scale = parseFloat(sliderScale.value);
-        uniformV[offScale] = scale * 0.5;
+    function updateBindGroupAndDraw() {
         device.queue.writeBuffer(uniformBuffer, 0, uniformV);
         for(let colorAttachment of renderPassDescriptor.colorAttachments) {
             if(!colorAttachment) continue; 
@@ -203,7 +196,32 @@ async function main() {
                 draw(device, renderPassDescriptor, pipeline, planeVertexBuffer, indexBuffer, bindGroups[3]);
             }
         }
+    }
+
+    sliderScale.addEventListener('input', () => {
+
+        const scale = parseFloat(sliderScale.value);
+        uniformV[offScale] = scale * 0.05;
+
+        updateBindGroupAndDraw();
+
     });
+
+    radioAdressModeRepeat.addEventListener('input', () => {
+        updateBindGroupAndDraw();
+    });
+    
+    radioAdressModeClampToEdge.addEventListener('input', () => {
+        updateBindGroupAndDraw();
+    });
+
+    radioFilterLinear.addEventListener('input', () => {
+        updateBindGroupAndDraw();
+    });
+
+    radioFilterNearest.addEventListener('input', () => {
+        updateBindGroupAndDraw();
+    }); 
 
     const observer = new ResizeObserver(entries => {
         for(const entry of entries) {
@@ -244,6 +262,7 @@ function draw(device: GPUDevice, renderPassDescriptor: GPURenderPassDescriptor, 
     const commandBuffer = encoder.finish();
     device.queue.submit([commandBuffer]);
 }
+
 
 
 main();
