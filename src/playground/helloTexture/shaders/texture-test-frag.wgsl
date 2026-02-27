@@ -1,9 +1,12 @@
 struct VertexOutput {
     @builtin(position) pos: vec4f,
+    @location(0) uv: vec2f,
 };
 
+@group(0) @binding(0) var mySampler: sampler;
+@group(0) @binding(1) var myTexture: texture_2d<f32>;
 
-@fragment fn fs(vsOut: VertexOutput) -> @location(0) vec4f {
+@fragment fn fs(input: VertexOutput) -> @location(0) vec4f {
 
-    return vec4f(0.0, 0.0, 1.0, 1.0);
+    return textureSample(myTexture, mySampler, input.uv);
 }
