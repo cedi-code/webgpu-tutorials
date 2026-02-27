@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Texture Test</title>
+        <style>
+            html, body {
+                margin: 0;
+                height: 100%;
+            }
+            canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+        <script type="importmap">
+            {
+            "imports": {
+                "gl-matrix": "https://cdn.skypack.dev/gl-matrix"
+            }
+            }
+    </script>
+    </head>
+    <body>
+        <canvas></canvas>
+        <input type="range" id="checkerScale" min="1" max="40" value="8" step="1">
+        <script type="module" src="../texture-test.js"></script>
+    </body>
+</html>

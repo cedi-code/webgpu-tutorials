@@ -379,4 +379,10 @@ async function main() {
     requestAnimationFrame(animate);
 }
 
-main();
+
+
+
+export {
+    render,
+    getwebgpucontext,
+}
